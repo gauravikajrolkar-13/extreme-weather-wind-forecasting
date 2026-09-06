@@ -11,9 +11,11 @@ import seaborn as sns
 import pydeck as pdk
 import plotly.graph_objects as go
 from xgboost import XGBRegressor, XGBClassifier
+from sklearn.neural_network import MLPRegressor
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     mean_squared_error, mean_absolute_error, r2_score,
-    accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+    accuracy_score, precision_score, recall_score, f1_score
 )
 import io
 
@@ -30,13 +32,11 @@ st.set_page_config(
 # Custom Unified CSS Design System
 st.markdown("""
 <style>
-    /* CSS Reset and Font Defaults */
     .stApp {
         background-color: #F8FAFC;
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
     
-    /* Global Navigation Sidebar Styling */
     section[data-testid="stSidebar"] {
         background-color: #0F172A !important;
         border-right: 1px solid #1E293B;
@@ -45,7 +45,6 @@ st.markdown("""
         color: #94A3B8 !important;
     }
     
-    /* Header Banner */
     .main-header {
         background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
         padding: 24px 32px;
@@ -69,7 +68,6 @@ st.markdown("""
         font-weight: 500;
     }
 
-    /* Structured Metric Cards */
     .metric-card {
         background-color: #FFFFFF;
         border: 1px solid #E2E8F0;
@@ -96,7 +94,6 @@ st.markdown("""
         letter-spacing: 0.05em;
     }
 
-    /* Weather Regime Badges */
     .status-badge {
         padding: 12px 20px;
         border-radius: 8px;
@@ -116,7 +113,6 @@ st.markdown("""
         border: 1px solid #FECACA;
     }
 
-    /* Form Container Polish */
     div[data-testid="stForm"] {
         border: 1px solid #E2E8F0;
         border-radius: 10px;
@@ -124,7 +120,6 @@ st.markdown("""
         padding: 20px;
     }
     
-    /* Align Tabs */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
         border-bottom: 2px solid #E2E8F0;
@@ -142,12 +137,35 @@ st.markdown("""
 sns.set_theme(style="whitegrid", palette="deep")
 
 # --------------------------------------------------------------------------------
-# 2. DATASET & DUAL-EXPERT MODEL INITIALIZATION
+# 2. FEATURE ENGINEERING & DATASET BUILDER
 # --------------------------------------------------------------------------------
+def compute_engineered_features(df):
+    """Calculates physical wind domain features for ML and DL models."""
+    data = df.copy()
+    
+    # 1. Kinetic Power Density Proxy (P ~ v^3)
+    data['Wspd_Cubed'] = data['Wspd (m/s)'] ** 3
+    
+    # 2. Air Density Correction Factor (approx function of temp)
+    air_density = 1.225 * (288.15 / (273.15 + data['Etmp (°C)']))
+    data['Air_Density_kg_m3'] = air_density
+    
+    # 3. Wind Power Density (WPD = 0.5 * rho * v^3)
+    data['Wind_Power_Density'] = 0.5 * air_density * data['Wspd_Cubed']
+    
+    # 4. Pitch Interaction Proxy (effective aerodynamic drag force)
+    data['Pitch_Efficiency_Factor'] = np.cos(np.radians(data['Prtv (°)']))
+    
+    # 5. Directional Sine/Cosine Trigonometric Encoding
+    data['Wdir_Sin'] = np.sin(np.radians(data['Wdir (°)']))
+    data['Wdir_Cos'] = np.cos(np.radians(data['Wdir (°)']))
+    
+    return data
+
 @st.cache_resource
 def load_and_train_models():
     np.random.seed(42)
-    feature_names = ['Wspd (m/s)', 'Wdir (°)', 'Prtv (°)', 'Purt (kVAR)', 'Etmp (°C)']
+    base_feature_names = ['Wspd (m/s)', 'Wdir (°)', 'Prtv (°)', 'Purt (kVAR)', 'Etmp (°C)']
     
     n_samples = 2500
     wspd = np.abs(np.random.normal(12, 6, n_samples))
@@ -157,11 +175,15 @@ def load_and_train_models():
     purt = 1.5 * prtv + np.random.normal(20, 12, n_samples)
     etmp = 25 - (wspd * 0.4) + np.random.normal(0, 5, n_samples)
     
-    X = pd.DataFrame(np.column_stack([wspd, wdir, prtv, purt, etmp]), columns=feature_names)
+    raw_df = pd.DataFrame(np.column_stack([wspd, wdir, prtv, purt, etmp]), columns=base_feature_names)
     
-    # Power Curve Generation Function
+    # Apply Feature Engineering
+    X = compute_engineered_features(raw_df)
+    feature_names = list(X.columns)
+
+    # Power Curve Target Function
     y = 0.5 * (X['Wspd (m/s)'] ** 3) - (X['Prtv (°)'] * 18) + np.random.normal(0, 45, n_samples)
-    y[X['Wspd (m/s)'] > 25.0] = 0.0  # Cut-out safety shutdown
+    y[X['Wspd (m/s)'] > 25.0] = 0.0  # Emergency Cut-out
     y = np.clip(y, 0, 1500)
     
     extreme_labels = ((X['Wspd (m/s)'] > 19.0) | (X['Prtv (°)'] > 20.0)).astype(int)
@@ -171,30 +193,46 @@ def load_and_train_models():
     y_train, y_test = y.iloc[:train_size], y.iloc[train_size:]
     ext_train, ext_test = extreme_labels.iloc[:train_size], extreme_labels.iloc[train_size:]
 
-    # Base Global Regressor
+    # Scale engineered features for Deep Learning Model
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+
+    # --- DEEP LEARNING MODEL (Multi-Layer Perceptron) ---
+    dl_model = MLPRegressor(
+        hidden_layer_sizes=(64, 32),
+        activation='relu',
+        solver='adam',
+        max_iter=350,
+        random_state=42
+    )
+    dl_model.fit(X_train_scaled, y_train)
+
+    # --- BASELINE GRADIENT BOOSTING REGRESSOR ---
     global_model = XGBRegressor(n_estimators=60, max_depth=5, learning_rate=0.08, tree_method='hist', random_state=42)
     global_model.fit(X_train, y_train)
 
-    # Sub-Model A (Normal Specialist)
+    # --- SUB-MODEL A (Normal Specialist) ---
     model_a = XGBRegressor(n_estimators=60, max_depth=5, learning_rate=0.08, tree_method='hist', random_state=42)
     model_a.fit(X_train[ext_train == 0], y_train[ext_train == 0])
 
-    # Sub-Model B (Extreme Specialist)
+    # --- SUB-MODEL B (Extreme Specialist) ---
     model_b = XGBRegressor(n_estimators=60, max_depth=5, learning_rate=0.08, tree_method='hist', random_state=42)
     model_b.fit(X_train[ext_train == 1], y_train[ext_train == 1])
 
-    # Gate Router (No Target Leakage)
-    gate_features = ['Wdir (°)', 'Purt (kVAR)', 'Etmp (°C)']
+    # --- GATE ROUTER (No Target Leakage) ---
+    gate_features = ['Wdir (°)', 'Purt (kVAR)', 'Etmp (°C)', 'Wdir_Sin', 'Wdir_Cos', 'Air_Density_kg_m3']
     X_gate_train = X_train[gate_features]
     
     gate = XGBClassifier(n_estimators=50, max_depth=4, learning_rate=0.08, tree_method='hist', random_state=42)
     gate.fit(X_gate_train, ext_train)
 
-    return global_model, model_a, model_b, gate, X_test, y_test, ext_test, feature_names, gate_features
+    return global_model, dl_model, scaler, model_a, model_b, gate, X_test, X_test_scaled, y_test, ext_test, feature_names, gate_features, base_feature_names
 
-global_model, model_a, model_b, gate, X_test_ref, y_test_ref, extreme_ref, feature_names, gate_features = load_and_train_models()
+global_model, dl_model, scaler, model_a, model_b, gate, X_test_ref, X_test_scaled, y_test_ref, extreme_ref, feature_names, gate_features, base_feature_names = load_and_train_models()
 
 y_pred_global = global_model.predict(X_test_ref)
+y_pred_dl = dl_model.predict(X_test_scaled)
 y_pred_model_a = model_a.predict(X_test_ref)
 y_pred_model_b = model_b.predict(X_test_ref)
 
@@ -208,14 +246,14 @@ y_pred_hybrid = (1 - gate_probs) * y_pred_model_a + gate_probs * y_pred_model_b
 st.markdown("""
 <div class="main-header">
     <div class="main-title">Extreme-Weather Wind Power Forecasting Platform</div>
-    <div class="sub-title">Dual-Expert Gated Machine Learning Architecture for Operational Grid Dispatch</div>
+    <div class="sub-title">Gated Hybrid Architecture combining Deep Learning & Machine Learning Specialists</div>
 </div>
 """, unsafe_allow_html=True)
 
 with st.sidebar:
     st.image("https://img.icons8.com/isometric-line/100/38BDF8/wind-turbine.png", width=64)
     st.title("Control Panel")
-    st.caption("System v3.2 Pro | Active Grid Node")
+    st.caption("System v3.3 Pro | Active Grid Node")
     st.markdown("---")
     
     st.subheader("Global Settings")
@@ -224,6 +262,8 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("System Status")
     st.success("● SCADA Link Active")
+    st.info("● Deep Learning Engine Online")
+    st.info("● Engineered Features Loaded")
     st.info("● Dual-Expert Gate Ready")
 
 # Main Page Tabs
@@ -237,13 +277,12 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 ])
 
 # --------------------------------------------------------------------------------
-# TAB 1: REAL-TIME SIMULATOR (WITH PRESET SCENARIO BUTTONS)
+# TAB 1: REAL-TIME SIMULATOR
 # --------------------------------------------------------------------------------
 with tab1:
     st.markdown("### Interactive Telemetry Simulator & Gated Routing")
-    st.write("Test single-instance SCADA inputs against the gated routing classifier or load operational presets.")
+    st.write("Test single-instance SCADA inputs against engineered domain features, deep learning models, and gated routing classifiers.")
 
-    # Preset Operational Scenarios
     st.markdown("#### Operational Preset Scenarios")
     p_col1, p_col2, p_col3, p_col4 = st.columns(4)
     
@@ -303,7 +342,9 @@ with tab1:
 
         gate_threshold = st.slider("Gate Decision Sensitivity Threshold", 0.10, 0.90, 0.50, 0.05)
 
-        input_df = pd.DataFrame([[wind_speed, wind_direction, pitch_angle, reactive_power, ambient_temp]], columns=feature_names)
+        raw_input_df = pd.DataFrame([[wind_speed, wind_direction, pitch_angle, reactive_power, ambient_temp]], columns=base_feature_names)
+        input_df = compute_engineered_features(raw_input_df)
+        input_scaled = scaler.transform(input_df)
         input_gate_df = input_df[gate_features]
 
     with col_results:
@@ -312,6 +353,7 @@ with tab1:
         prob_extreme = gate.predict_proba(input_gate_df)[0][1]
         is_extreme = prob_extreme >= gate_threshold
         
+        pred_dl = max(0.0, float(dl_model.predict(input_scaled)[0]))
         pred_a = max(0.0, float(model_a.predict(input_df)[0]))
         pred_b = max(0.0, float(model_b.predict(input_df)[0]))
         hybrid_out = max(0.0, float((1 - prob_extreme) * pred_a + prob_extreme * pred_b))
@@ -323,21 +365,22 @@ with tab1:
 
         m_col1, m_col2 = st.columns(2)
         with m_col1:
-            st.markdown(f'<div class="metric-card"><div class="metric-lbl">Predicted Generation</div><div class="metric-val">{hybrid_out:.2f} kW</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-card"><div class="metric-lbl">Gated Hybrid Power</div><div class="metric-val">{hybrid_out:.2f} kW</div></div>', unsafe_allow_html=True)
         with m_col2:
-            st.markdown(f'<div class="metric-card"><div class="metric-lbl">Hourly Revenue Est.</div><div class="metric-val" style="color: #166534;">${(hybrid_out * power_rate_kw):.2f}</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-card"><div class="metric-lbl">Deep Learning MLP Power</div><div class="metric-val" style="color: #0284C7;">{pred_dl:.2f} kW</div></div>', unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
         st.caption("Classifier Routing Confidence Meter:")
         st.progress(float(prob_extreme))
 
         st.markdown("---")
-        st.markdown("**Sub-Model Ensemble Breakdown:**")
-        st.markdown(f"* **Model A (Normal Specialist Weight: {(1 - prob_extreme):.1%}):** `{pred_a:.2f} kW`")
-        st.markdown(f"* **Model B (Extreme Specialist Weight: {prob_extreme:.1%}):** `{pred_b:.2f} kW`")
+        st.markdown("**Computed Engineered Feature Values:**")
+        st.markdown(f"* **Wind Power Density (WPD):** `{input_df['Wind_Power_Density'].values[0]:.2f} W/m²`")
+        st.markdown(f"* **Air Density ($\rho$):** `{input_df['Air_Density_kg_m3'].values[0]:.3f} kg/m³`")
+        st.markdown(f"* **Direction Trigonometric Component (Sin):** `{input_df['Wdir_Sin'].values[0]:.3f}`")
 
 # --------------------------------------------------------------------------------
-# TAB 2: TIME-SERIES HORIZON (WITH CONFIDENCE UNCERTAINTY BANDS)
+# TAB 2: TIME-SERIES HORIZON
 # --------------------------------------------------------------------------------
 with tab2:
     st.markdown("### Time-Series Power Generation Horizon")
@@ -347,7 +390,7 @@ with tab2:
     time_steps = np.arange(1, 25)
     past_power = 400 + 150 * np.sin(time_steps / 3) + np.random.normal(0, 15, 24)
     forecast_val = 620.45
-    std_error = 28.5  # Uncertainty confidence band
+    std_error = 28.5
 
     c_ts1, c_ts2 = st.columns(2)
 
@@ -355,14 +398,9 @@ with tab2:
         st.markdown("#### Horizon Trend with Uncertainty Band")
         fig_ts1 = go.Figure()
         
-        # Historical Trace
         fig_ts1.add_trace(go.Scatter(x=time_steps, y=past_power, mode='lines+markers', name='Historical Generation (kW)', line=dict(color='#0284C7', width=2.5)))
-        
-        # Projected Point with Confidence Band
         fig_ts1.add_trace(go.Scatter(x=[24, 25], y=[past_power[-1], forecast_val], mode='lines', line=dict(color='#DC2626', dash='dash', width=2), showlegend=False))
         fig_ts1.add_trace(go.Scatter(x=[25], y=[forecast_val], mode='markers', marker=dict(color='#DC2626', size=10), name='Point Forecast (620.45 kW)'))
-        
-        # Upper/Lower Bounds
         fig_ts1.add_trace(go.Scatter(
             x=[25, 25], y=[forecast_val - std_error, forecast_val + std_error],
             mode='lines+markers', name='95% Confidence Margin', line=dict(color='#F59E0B', width=4)
@@ -379,13 +417,12 @@ with tab2:
         st.plotly_chart(fig_ts2, use_container_width=True)
 
 # --------------------------------------------------------------------------------
-# TAB 3: GEOSPATIAL WIND FARM MAP (NEW FEATURE)
+# TAB 3: GEOSPATIAL WIND FARM MAP
 # --------------------------------------------------------------------------------
 with tab3:
     st.markdown("### Fleet-Level Geospatial Interactive Map")
     st.write("Real-time operational monitoring across turbine assets in the wind farm cluster.")
 
-    # Synthetic Fleet Turbines Data
     map_data = pd.DataFrame({
         'Turbine_ID': [f'T-{i:02d}' for i in range(1, 13)],
         'lat': [36.102 + np.random.uniform(-0.015, 0.015) for _ in range(12)],
@@ -397,7 +434,6 @@ with tab3:
     col_map1, col_map2 = st.columns([2.5, 1])
 
     with col_map1:
-        # PyDeck Scatterplot / Column Layer
         layer = pdk.Layer(
             "ScatterplotLayer",
             map_data,
@@ -425,7 +461,7 @@ with tab3:
         )
 
 # --------------------------------------------------------------------------------
-# TAB 4: BENCHMARKS & PLOTLY TARGET VS. PREDICTED OVERLAY
+# TAB 4: BENCHMARKS & DEEP LEARNING COMPARISON OVERLAY
 # --------------------------------------------------------------------------------
 with tab4:
     st.markdown("### Benchmarks & Validation Analytics")
@@ -448,13 +484,13 @@ with tab4:
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("---")
 
-    # Interactive Target vs Predicted Overlay (Plotly)
-    st.markdown("#### Ground Truth Actual Power vs. Model Predictions (Test Sample Stream)")
+    st.markdown("#### Ground Truth Actual Power vs. ML & Deep Learning Models")
     
     sample_indices = np.arange(60)
     fig_overlay = go.Figure()
     
     fig_overlay.add_trace(go.Scatter(x=sample_indices, y=y_test_ref.values[:60], mode='lines', name='Actual Ground Truth (kW)', line=dict(color='#0F172A', width=3)))
+    fig_overlay.add_trace(go.Scatter(x=sample_indices, y=y_pred_dl[:60], mode='lines', name='Deep Neural Network (MLP)', line=dict(color='#F59E0B', dash='dash', width=2)))
     fig_overlay.add_trace(go.Scatter(x=sample_indices, y=y_pred_global[:60], mode='lines', name='Baseline Global Model', line=dict(color='#DC2626', dash='dot', width=2)))
     fig_overlay.add_trace(go.Scatter(x=sample_indices, y=y_pred_hybrid[:60], mode='lines', name='Gated Hybrid Model', line=dict(color='#0284C7', width=2.5)))
 
@@ -462,36 +498,46 @@ with tab4:
     st.plotly_chart(fig_overlay, use_container_width=True)
 
     st.markdown("---")
-    col_bench, col_feat = st.columns([1.2, 1])
+    col_bench, col_feat = st.columns([1.3, 1])
     
     with col_bench:
-        st.markdown("#### Regression Benchmark Matrix")
-        metrics_3_models = pd.DataFrame({
+        st.markdown("#### Model Architecture Benchmark Matrix")
+        metrics_df = pd.DataFrame({
             "Architecture": [
-                "Baseline 1: Global Single Model (All Data)", 
-                "Baseline 2: Model A Specialist (Normal Data)", 
-                "Proposed: Dual-Expert Gated Hybrid Network"
+                "Global Deep Learning (MLP Neural Net)",
+                "Baseline Global Single Model (XGBoost)", 
+                "Model A Specialist (Normal Weather)", 
+                "Proposed: Gated Dual-Expert Hybrid"
+            ],
+            "Category": [
+                "Deep Learning",
+                "Classical ML",
+                "Specialist ML",
+                "Gated Ensemble"
             ],
             "RMSE (kW)": [
+                f"{np.sqrt(mean_squared_error(y_test_ref, y_pred_dl)):.2f}",
                 f"{np.sqrt(mean_squared_error(y_test_ref, y_pred_global)):.2f}",
                 f"{np.sqrt(mean_squared_error(y_test_ref, y_pred_model_a)):.2f}",
                 f"{np.sqrt(mean_squared_error(y_test_ref, y_pred_hybrid)):.2f}"
             ],
             "MAE (kW)": [
+                f"{mean_absolute_error(y_test_ref, y_pred_dl):.2f}",
                 f"{mean_absolute_error(y_test_ref, y_pred_global):.2f}",
                 f"{mean_absolute_error(y_test_ref, y_pred_model_a):.2f}",
                 f"{mean_absolute_error(y_test_ref, y_pred_hybrid):.2f}"
             ],
             "R² Score": [
+                f"{r2_score(y_test_ref, y_pred_dl):.3f}",
                 f"{r2_score(y_test_ref, y_pred_global):.3f}",
                 f"{r2_score(y_test_ref, y_pred_model_a):.3f}",
                 f"{r2_score(y_test_ref, y_pred_hybrid):.3f}"
             ]
         })
-        st.table(metrics_3_models)
+        st.table(metrics_df)
 
     with col_feat:
-        st.markdown("#### Gate Feature Importance (No-Leakage)")
+        st.markdown("#### Gate Feature Importance (No-Leakage Matrix)")
         importances = gate.feature_importances_
         feat_imp_df = pd.DataFrame({'Feature': gate_features, 'Importance': importances}).sort_values('Importance', ascending=True)
         
@@ -582,6 +628,7 @@ with tab6:
     summary_txt = f"""=== ENTERPRISE WIND POWER FORECASTING SYSTEM SUMMARY REPORT ===
     
 MODEL PERFORMANCE:
+- Global Deep Neural Network (MLP) RMSE: {np.sqrt(mean_squared_error(y_test_ref, y_pred_dl)):.2f} kW
 - Baseline Global Single Model RMSE: {np.sqrt(mean_squared_error(y_test_ref, y_pred_global)):.2f} kW
 - Hybrid Model RMSE: {np.sqrt(mean_squared_error(y_test_ref, y_pred_hybrid)):.2f} kW
 - Hybrid Model MAE: {mean_absolute_error(y_test_ref, y_pred_hybrid):.2f} kW
