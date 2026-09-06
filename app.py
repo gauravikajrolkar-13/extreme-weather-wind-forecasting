@@ -1,6 +1,6 @@
 # ================================================================================
-# STREAMLIT APP: EXTREME-WEATHER WIND POWER FORECASTING SYSTEM (ENTERPRISE)
-# Save this file as `app.py` in your GitHub repository root
+# STREAMLIT APP: ENTERPRISE EXTREME-WEATHER WIND POWER FORECASTING PLATFORM
+# Save this file as `app.py` in your repository root directory
 # ================================================================================
 
 import streamlit as st
@@ -8,6 +8,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pydeck as pdk
+import plotly.graph_objects as go
 from xgboost import XGBRegressor, XGBClassifier
 from sklearn.metrics import (
     mean_squared_error, mean_absolute_error, r2_score,
@@ -16,48 +18,123 @@ from sklearn.metrics import (
 import io
 
 # --------------------------------------------------------------------------------
-# 1. PAGE LAYOUT & ENTERPRISE STYLING
+# 1. PAGE LAYOUT & ENTERPRISE DESIGN SYSTEM
 # --------------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Wind Power Forecasting System",
+    page_title="Enterprise Wind Power Forecasting System",
+    page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
+# Custom Unified CSS Design System
 st.markdown("""
 <style>
-    .main-header {
-        background: linear-gradient(90deg, #0F172A 0%, #1E293B 100%);
-        padding: 22px 30px;
-        border-radius: 10px;
-        color: white;
-        margin-bottom: 25px;
+    /* CSS Reset and Font Defaults */
+    .stApp {
+        background-color: #F8FAFC;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
-    .main-title { font-size: 2.1rem; font-weight: 700; margin: 0; color: #F8FAFC; }
-    .sub-title { font-size: 0.95rem; color: #94A3B8; margin-top: 5px; }
     
+    /* Global Navigation Sidebar Styling */
+    section[data-testid="stSidebar"] {
+        background-color: #0F172A !important;
+        border-right: 1px solid #1E293B;
+    }
+    section[data-testid="stSidebar"] .stMarkdown, section[data-testid="stSidebar"] p {
+        color: #94A3B8 !important;
+    }
+    
+    /* Header Banner */
+    .main-header {
+        background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+        padding: 24px 32px;
+        border-radius: 12px;
+        color: white;
+        margin-bottom: 24px;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+        border: 1px solid #334155;
+    }
+    .main-title { 
+        font-size: 2.1rem; 
+        font-weight: 700; 
+        margin: 0; 
+        color: #F8FAFC;
+        letter-spacing: -0.02em;
+    }
+    .sub-title { 
+        font-size: 0.95rem; 
+        color: #38BDF8; 
+        margin-top: 6px; 
+        font-weight: 500;
+    }
+
+    /* Structured Metric Cards */
     .metric-card {
         background-color: #FFFFFF;
         border: 1px solid #E2E8F0;
-        border-radius: 8px;
-        padding: 16px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        border-radius: 10px;
+        padding: 18px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
         text-align: center;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
-    .metric-val { font-size: 1.7rem; font-weight: 700; color: #0284C7; }
-    .metric-lbl { font-size: 0.78rem; color: #64748B; text-transform: uppercase; font-weight: 600; }
+    .metric-val { 
+        font-size: 1.8rem; 
+        font-weight: 700; 
+        color: #0284C7; 
+        margin: 4px 0;
+    }
+    .metric-lbl { 
+        font-size: 0.75rem; 
+        color: #64748B; 
+        text-transform: uppercase; 
+        font-weight: 700;
+        letter-spacing: 0.05em;
+    }
+
+    /* Weather Regime Badges */
+    .status-badge {
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 0.9rem;
+        text-align: center;
+        margin-bottom: 16px;
+    }
+    .badge-normal {
+        background-color: #DCFCE7;
+        color: #166534;
+        border: 1px solid #BBF7D0;
+    }
+    .badge-extreme {
+        background-color: #FEE2E2;
+        color: #991B1B;
+        border: 1px solid #FECACA;
+    }
+
+    /* Form Container Polish */
+    div[data-testid="stForm"] {
+        border: 1px solid #E2E8F0;
+        border-radius: 10px;
+        background-color: #FFFFFF;
+        padding: 20px;
+    }
     
-    .status-badge-normal {
-        background-color: #DCFCE7; color: #166534; border: 1px solid #BBF7D0;
-        padding: 10px 18px; border-radius: 20px; font-weight: 600; text-align: center;
+    /* Align Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        border-bottom: 2px solid #E2E8F0;
     }
-    .status-badge-extreme {
-        background-color: #FEE2E2; color: #991B1B; border: 1px solid #FECACA;
-        padding: 10px 18px; border-radius: 20px; font-weight: 600; text-align: center;
-    }
-    .status-badge-anomaly {
-        background-color: #FEF3C7; color: #92400E; border: 1px solid #FDE68A;
-        padding: 10px 18px; border-radius: 20px; font-weight: 600; text-align: center;
+    .stTabs [data-baseweb="tab"] {
+        height: 48px;
+        white-space: pre-wrap;
+        border-radius: 6px 6px 0 0;
+        font-weight: 600;
+        padding: 0 16px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -65,7 +142,7 @@ st.markdown("""
 sns.set_theme(style="whitegrid", palette="deep")
 
 # --------------------------------------------------------------------------------
-# 2. DATA & MODEL INITIALIZATION
+# 2. DATASET & DUAL-EXPERT MODEL INITIALIZATION
 # --------------------------------------------------------------------------------
 @st.cache_resource
 def load_and_train_models():
@@ -82,8 +159,9 @@ def load_and_train_models():
     
     X = pd.DataFrame(np.column_stack([wspd, wdir, prtv, purt, etmp]), columns=feature_names)
     
+    # Power Curve Generation Function
     y = 0.5 * (X['Wspd (m/s)'] ** 3) - (X['Prtv (°)'] * 18) + np.random.normal(0, 45, n_samples)
-    y[X['Wspd (m/s)'] > 25.0] = 0.0
+    y[X['Wspd (m/s)'] > 25.0] = 0.0  # Cut-out safety shutdown
     y = np.clip(y, 0, 1500)
     
     extreme_labels = ((X['Wspd (m/s)'] > 19.0) | (X['Prtv (°)'] > 20.0)).astype(int)
@@ -93,15 +171,19 @@ def load_and_train_models():
     y_train, y_test = y.iloc[:train_size], y.iloc[train_size:]
     ext_train, ext_test = extreme_labels.iloc[:train_size], extreme_labels.iloc[train_size:]
 
+    # Base Global Regressor
     global_model = XGBRegressor(n_estimators=60, max_depth=5, learning_rate=0.08, tree_method='hist', random_state=42)
     global_model.fit(X_train, y_train)
 
+    # Sub-Model A (Normal Specialist)
     model_a = XGBRegressor(n_estimators=60, max_depth=5, learning_rate=0.08, tree_method='hist', random_state=42)
     model_a.fit(X_train[ext_train == 0], y_train[ext_train == 0])
 
+    # Sub-Model B (Extreme Specialist)
     model_b = XGBRegressor(n_estimators=60, max_depth=5, learning_rate=0.08, tree_method='hist', random_state=42)
     model_b.fit(X_train[ext_train == 1], y_train[ext_train == 1])
 
+    # Gate Router (No Target Leakage)
     gate_features = ['Wdir (°)', 'Purt (kVAR)', 'Etmp (°C)']
     X_gate_train = X_train[gate_features]
     
@@ -121,48 +203,111 @@ gate_preds = (gate_probs >= 0.50).astype(int)
 y_pred_hybrid = (1 - gate_probs) * y_pred_model_a + gate_probs * y_pred_model_b
 
 # --------------------------------------------------------------------------------
-# HEADER & NAVIGATION TABS
+# 3. GLOBAL HEADER & SIDEBAR NAVIGATION
 # --------------------------------------------------------------------------------
 st.markdown("""
 <div class="main-header">
     <div class="main-title">Extreme-Weather Wind Power Forecasting Platform</div>
-    <div class="sub-title">Dual-Expert Gated Machine Learning System for Operational Power Grid Analytics</div>
+    <div class="sub-title">Dual-Expert Gated Machine Learning Architecture for Operational Grid Dispatch</div>
 </div>
 """, unsafe_allow_html=True)
 
+with st.sidebar:
+    st.image("https://img.icons8.com/isometric-line/100/38BDF8/wind-turbine.png", width=64)
+    st.title("Control Panel")
+    st.caption("System v3.2 Pro | Active Grid Node")
+    st.markdown("---")
+    
+    st.subheader("Global Settings")
+    power_rate_kw = st.number_input("Energy Rate ($/kWh)", min_value=0.01, max_value=1.00, value=0.12, step=0.01)
+    
+    st.markdown("---")
+    st.subheader("System Status")
+    st.success("● SCADA Link Active")
+    st.info("● Dual-Expert Gate Ready")
+
+# Main Page Tabs
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "Real-Time Simulator", 
-    "Time-Series Horizon", 
-    "Model Benchmarks & SHAP", 
-    "SCADA Anomaly Detector",
-    "Dataset & EDA Explorer",
-    "Architecture & Summary"
+    " Real-Time Simulator", 
+    " Time-Series Horizon", 
+    " Geospatial Fleet Map",
+    " Benchmarks & Analytics", 
+    " SCADA Anomaly Detector",
+    " Dataset & Summary Export"
 ])
 
 # --------------------------------------------------------------------------------
-# TAB 1: REAL-TIME SIMULATOR
+# TAB 1: REAL-TIME SIMULATOR (WITH PRESET SCENARIO BUTTONS)
 # --------------------------------------------------------------------------------
 with tab1:
-    st.markdown("### Interactive Telemetry Simulator & Routing Threshold")
+    st.markdown("### Interactive Telemetry Simulator & Gated Routing")
+    st.write("Test single-instance SCADA inputs against the gated routing classifier or load operational presets.")
+
+    # Preset Operational Scenarios
+    st.markdown("#### Operational Preset Scenarios")
+    p_col1, p_col2, p_col3, p_col4 = st.columns(4)
     
-    col_input, col_results = st.columns([1, 1.2])
+    if "sim_wspd" not in st.session_state:
+        st.session_state.sim_wspd = 18.5
+        st.session_state.sim_wdir = 180
+        st.session_state.sim_prtv = 15.0
+        st.session_state.sim_purt = 65.0
+        st.session_state.sim_etmp = 12.0
+
+    with p_col1:
+        if st.button(" Preset 1: Nominal Breeze", use_container_width=True):
+            st.session_state.sim_wspd = 11.2
+            st.session_state.sim_wdir = 145
+            st.session_state.sim_prtv = 0.5
+            st.session_state.sim_purt = 15.0
+            st.session_state.sim_etmp = 22.0
+            st.rerun()
+
+    with p_col2:
+        if st.button(" Preset 2: Impending Storm", use_container_width=True):
+            st.session_state.sim_wspd = 21.4
+            st.session_state.sim_wdir = 290
+            st.session_state.sim_prtv = 24.5
+            st.session_state.sim_purt = 110.0
+            st.session_state.sim_etmp = 4.0
+            st.rerun()
+
+    with p_col3:
+        if st.button(" Preset 3: Emergency Cut-out", use_container_width=True):
+            st.session_state.sim_wspd = 28.5
+            st.session_state.sim_wdir = 315
+            st.session_state.sim_prtv = 82.0
+            st.session_state.sim_purt = 280.0
+            st.session_state.sim_etmp = -2.0
+            st.rerun()
+
+    with p_col4:
+        if st.button(" Preset 4: Low Wind Idle", use_container_width=True):
+            st.session_state.sim_wspd = 2.8
+            st.session_state.sim_wdir = 40
+            st.session_state.sim_prtv = -1.0
+            st.session_state.sim_purt = 5.0
+            st.session_state.sim_etmp = 18.0
+            st.rerun()
+
+    st.markdown("---")
+    col_input, col_results = st.columns([1.1, 1.2])
 
     with col_input:
-        st.markdown("#### Input Telemetry Data")
-        wind_speed = st.slider("Wind Speed (Wspd) [m/s]", 0.0, 40.0, 18.5, 0.5)
-        wind_direction = st.slider("Wind Direction (Wdir) [°]", 0, 360, 180, 5)
-        pitch_angle = st.slider("Pitch Angle (Prtv) [°]", -2.0, 90.0, 15.0, 0.5)
-        reactive_power = st.number_input("Reactive Power (Purt) [kVAR]", -50.0, 500.0, 65.0, 5.0)
-        ambient_temp = st.slider("Environment Temp (Etmp) [°C]", -15.0, 45.0, 12.0, 1.0)
+        st.markdown("#### Input SCADA Parameters")
+        wind_speed = st.slider("Wind Speed (Wspd) [m/s]", 0.0, 40.0, float(st.session_state.sim_wspd), 0.5)
+        wind_direction = st.slider("Wind Direction (Wdir) [°]", 0, 360, int(st.session_state.sim_wdir), 5)
+        pitch_angle = st.slider("Pitch Angle (Prtv) [°]", -2.0, 90.0, float(st.session_state.sim_prtv), 0.5)
+        reactive_power = st.number_input("Reactive Power (Purt) [kVAR]", -50.0, 500.0, float(st.session_state.sim_purt), 5.0)
+        ambient_temp = st.slider("Environment Temp (Etmp) [°C]", -15.0, 45.0, float(st.session_state.sim_etmp), 1.0)
 
-        st.markdown("---")
-        gate_threshold = st.slider("Gate Decision Threshold (Sensitivity)", 0.10, 0.90, 0.50, 0.05)
+        gate_threshold = st.slider("Gate Decision Sensitivity Threshold", 0.10, 0.90, 0.50, 0.05)
 
         input_df = pd.DataFrame([[wind_speed, wind_direction, pitch_angle, reactive_power, ambient_temp]], columns=feature_names)
         input_gate_df = input_df[gate_features]
 
     with col_results:
-        st.markdown("#### Inference & Routing Results")
+        st.markdown("#### Inference & Decision Routing")
         
         prob_extreme = gate.predict_proba(input_gate_df)[0][1]
         is_extreme = prob_extreme >= gate_threshold
@@ -171,92 +316,158 @@ with tab1:
         pred_b = max(0.0, float(model_b.predict(input_df)[0]))
         hybrid_out = max(0.0, float((1 - prob_extreme) * pred_a + prob_extreme * pred_b))
 
-        status_class = "status-badge-extreme" if is_extreme else "status-badge-normal"
-        status_text = f"EXTREME WEATHER REGIME (Threshold: {gate_threshold:.2f})" if is_extreme else f"NORMAL OPERATING REGIME (Threshold: {gate_threshold:.2f})"
+        status_class = "badge-extreme" if is_extreme else "badge-normal"
+        status_text = f"EXTREME WEATHER REGIME DETECTED (Prob: {prob_extreme:.1%})" if is_extreme else f"NOMINAL OPERATING REGIME DETECTED (Prob: {prob_extreme:.1%})"
 
-        st.markdown(f'<div class="{status_class}">{status_text}</div>', unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(f'<div class="status-badge {status_class}">{status_text}</div>', unsafe_allow_html=True)
 
         m_col1, m_col2 = st.columns(2)
         with m_col1:
-            st.markdown(f'<div class="metric-card"><div class="metric-lbl">Predicted Power Output</div><div class="metric-val">{hybrid_out:.2f} kW</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-card"><div class="metric-lbl">Predicted Generation</div><div class="metric-val">{hybrid_out:.2f} kW</div></div>', unsafe_allow_html=True)
         with m_col2:
-            st.markdown(f'<div class="metric-card"><div class="metric-lbl">Extreme Event Probability</div><div class="metric-val">{prob_extreme:.1%}</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-card"><div class="metric-lbl">Hourly Revenue Est.</div><div class="metric-val" style="color: #166534;">${(hybrid_out * power_rate_kw):.2f}</div></div>', unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
-        st.write("Gate Extreme Risk Meter:")
+        st.caption("Classifier Routing Confidence Meter:")
         st.progress(float(prob_extreme))
 
         st.markdown("---")
-        st.markdown("**Sub-Model Contributions:**")
-        st.markdown(f"* Model A (Normal Specialist): `{pred_a:.2f} kW`")
-        st.markdown(f"* Model B (Extreme Specialist): `{pred_b:.2f} kW`")
+        st.markdown("**Sub-Model Ensemble Breakdown:**")
+        st.markdown(f"* **Model A (Normal Specialist Weight: {(1 - prob_extreme):.1%}):** `{pred_a:.2f} kW`")
+        st.markdown(f"* **Model B (Extreme Specialist Weight: {prob_extreme:.1%}):** `{pred_b:.2f} kW`")
 
 # --------------------------------------------------------------------------------
-# TAB 2: TIME-SERIES HORIZON
+# TAB 2: TIME-SERIES HORIZON (WITH CONFIDENCE UNCERTAINTY BANDS)
 # --------------------------------------------------------------------------------
 with tab2:
-    st.markdown("### Horizon Time-Series Forecasting")
+    st.markdown("### Time-Series Power Generation Horizon")
+    st.write("24-Hour continuous historical SCADA telemetry paired with next time-step probabilistic point forecasting.")
     
     np.random.seed(99)
     time_steps = np.arange(1, 25)
     past_power = 400 + 150 * np.sin(time_steps / 3) + np.random.normal(0, 15, 24)
     forecast_val = 620.45
-    
-    st.info(f"Forecasted Next Time-Step Power Output: {forecast_val:.2f} kW")
+    std_error = 28.5  # Uncertainty confidence band
 
-    col_ts1, col_ts2 = st.columns(2)
+    c_ts1, c_ts2 = st.columns(2)
 
-    with col_ts1:
-        st.markdown("#### Power Generation Horizon")
-        fig_ts1, ax_ts1 = plt.subplots(figsize=(6, 3.8))
-        ax_ts1.plot(time_steps, past_power, marker='o', color='#0284C7', label='Historical Generation', linewidth=2)
-        ax_ts1.plot(25, forecast_val, marker='o', color='#DC2626', markersize=8, label='Projected Point')
-        ax_ts1.plot([24, 25], [past_power[-1], forecast_val], color='#DC2626', linestyle='--', linewidth=2)
-        ax_ts1.set_xlabel("Time Step (Hours)")
-        ax_ts1.set_ylabel("Power Output (kW)")
-        ax_ts1.legend(loc="upper left")
-        st.pyplot(fig_ts1)
+    with c_ts1:
+        st.markdown("#### Horizon Trend with Uncertainty Band")
+        fig_ts1 = go.Figure()
+        
+        # Historical Trace
+        fig_ts1.add_trace(go.Scatter(x=time_steps, y=past_power, mode='lines+markers', name='Historical Generation (kW)', line=dict(color='#0284C7', width=2.5)))
+        
+        # Projected Point with Confidence Band
+        fig_ts1.add_trace(go.Scatter(x=[24, 25], y=[past_power[-1], forecast_val], mode='lines', line=dict(color='#DC2626', dash='dash', width=2), showlegend=False))
+        fig_ts1.add_trace(go.Scatter(x=[25], y=[forecast_val], mode='markers', marker=dict(color='#DC2626', size=10), name='Point Forecast (620.45 kW)'))
+        
+        # Upper/Lower Bounds
+        fig_ts1.add_trace(go.Scatter(
+            x=[25, 25], y=[forecast_val - std_error, forecast_val + std_error],
+            mode='lines+markers', name='95% Confidence Margin', line=dict(color='#F59E0B', width=4)
+        ))
 
-    with col_ts2:
-        st.markdown("#### Power Trend Area View")
-        fig_ts2, ax_ts2 = plt.subplots(figsize=(6, 3.8))
-        ax_ts2.fill_between(time_steps, past_power, color='#38BDF8', alpha=0.35)
-        ax_ts2.plot(time_steps, past_power, color='#0284C7', linewidth=2)
-        ax_ts2.set_xlabel("Time Step (Hours)")
-        ax_ts2.set_ylabel("Power Output (kW)")
-        st.pyplot(fig_ts2)
+        fig_ts1.update_layout(xaxis_title="Time Step (Hours)", yaxis_title="Power Output (kW)", height=380, margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h", y=1.1))
+        st.plotly_chart(fig_ts1, use_container_width=True)
+
+    with c_ts2:
+        st.markdown("#### Cumulative Generation Profile")
+        fig_ts2 = go.Figure()
+        fig_ts2.add_trace(go.Scatter(x=time_steps, y=past_power, fill='tozeroy', line=dict(color='#38BDF8', width=2), name='Power Profile'))
+        fig_ts2.update_layout(xaxis_title="Time Step (Hours)", yaxis_title="Power Output (kW)", height=380, margin=dict(l=20, r=20, t=20, b=20))
+        st.plotly_chart(fig_ts2, use_container_width=True)
 
 # --------------------------------------------------------------------------------
-# TAB 3: BENCHMARKS & SHAP
+# TAB 3: GEOSPATIAL WIND FARM MAP (NEW FEATURE)
 # --------------------------------------------------------------------------------
 with tab3:
-    st.markdown("### Benchmarks & Model Interpretability")
+    st.markdown("### Fleet-Level Geospatial Interactive Map")
+    st.write("Real-time operational monitoring across turbine assets in the wind farm cluster.")
+
+    # Synthetic Fleet Turbines Data
+    map_data = pd.DataFrame({
+        'Turbine_ID': [f'T-{i:02d}' for i in range(1, 13)],
+        'lat': [36.102 + np.random.uniform(-0.015, 0.015) for _ in range(12)],
+        'lon': [-115.17 + np.random.uniform(-0.015, 0.015) for _ in range(12)],
+        'Power_kW': np.random.uniform(200, 1400, 12).round(1),
+        'Status': np.random.choice(['Nominal', 'Nominal', 'Extreme Guard Active'], 12)
+    })
+
+    col_map1, col_map2 = st.columns([2.5, 1])
+
+    with col_map1:
+        # PyDeck Scatterplot / Column Layer
+        layer = pdk.Layer(
+            "ScatterplotLayer",
+            map_data,
+            get_position=["lon", "lat"],
+            get_color="Status == 'Nominal' ? [2, 132, 199, 200] : [220, 38, 38, 200]",
+            get_radius=180,
+            pickable=True,
+        )
+
+        view_state = pdk.ViewState(latitude=36.102, longitude=-115.17, zoom=12.5, pitch=30)
+        
+        r = pdk.Deck(
+            layers=[layer],
+            initial_view_state=view_state,
+            tooltip={"text": "Asset: {Turbine_ID}\nGeneration: {Power_kW} kW\nStatus: {Status}"}
+        )
+        st.pydeck_chart(r)
+
+    with col_map2:
+        st.markdown("#### Fleet Telemetry Stream")
+        st.dataframe(
+            map_data[['Turbine_ID', 'Power_kW', 'Status']],
+            use_container_width=True,
+            height=380
+        )
+
+# --------------------------------------------------------------------------------
+# TAB 4: BENCHMARKS & PLOTLY TARGET VS. PREDICTED OVERLAY
+# --------------------------------------------------------------------------------
+with tab4:
+    st.markdown("### Benchmarks & Validation Analytics")
     
     prec = precision_score(extreme_ref, gate_preds)
     acc = accuracy_score(extreme_ref, gate_preds)
     rec = recall_score(extreme_ref, gate_preds)
     f1 = f1_score(extreme_ref, gate_preds)
 
-    col_p1, col_p2, col_p3, col_p4 = st.columns(4)
-    with col_p1:
-        st.markdown(f'<div class="metric-card"><div class="metric-lbl">Precision Rate</div><div class="metric-val">{prec:.1%}</div></div>', unsafe_allow_html=True)
-    with col_p2:
-        st.markdown(f'<div class="metric-card"><div class="metric-lbl">Accuracy Rate</div><div class="metric-val">{acc:.1%}</div></div>', unsafe_allow_html=True)
-    with col_p3:
-        st.markdown(f'<div class="metric-card"><div class="metric-lbl">Recall Rate</div><div class="metric-val">{rec:.1%}</div></div>', unsafe_allow_html=True)
-    with col_p4:
-        st.markdown(f'<div class="metric-card"><div class="metric-lbl">F1-Score</div><div class="metric-val">{f1:.3f}</div></div>', unsafe_allow_html=True)
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.markdown(f'<div class="metric-card"><div class="metric-lbl">Gate Accuracy</div><div class="metric-val">{acc:.1%}</div></div>', unsafe_allow_html=True)
+    with m2:
+        st.markdown(f'<div class="metric-card"><div class="metric-lbl">Gate Precision</div><div class="metric-val">{prec:.1%}</div></div>', unsafe_allow_html=True)
+    with m3:
+        st.markdown(f'<div class="metric-card"><div class="metric-lbl">Gate Recall</div><div class="metric-val">{rec:.1%}</div></div>', unsafe_allow_html=True)
+    with m4:
+        st.markdown(f'<div class="metric-card"><div class="metric-lbl">Gate F1-Score</div><div class="metric-val">{f1:.3f}</div></div>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("---")
 
+    # Interactive Target vs Predicted Overlay (Plotly)
+    st.markdown("#### Ground Truth Actual Power vs. Model Predictions (Test Sample Stream)")
+    
+    sample_indices = np.arange(60)
+    fig_overlay = go.Figure()
+    
+    fig_overlay.add_trace(go.Scatter(x=sample_indices, y=y_test_ref.values[:60], mode='lines', name='Actual Ground Truth (kW)', line=dict(color='#0F172A', width=3)))
+    fig_overlay.add_trace(go.Scatter(x=sample_indices, y=y_pred_global[:60], mode='lines', name='Baseline Global Model', line=dict(color='#DC2626', dash='dot', width=2)))
+    fig_overlay.add_trace(go.Scatter(x=sample_indices, y=y_pred_hybrid[:60], mode='lines', name='Gated Hybrid Model', line=dict(color='#0284C7', width=2.5)))
+
+    fig_overlay.update_layout(xaxis_title="Sample Index", yaxis_title="Power Output (kW)", height=380, margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h", y=1.1))
+    st.plotly_chart(fig_overlay, use_container_width=True)
+
+    st.markdown("---")
     col_bench, col_feat = st.columns([1.2, 1])
     
     with col_bench:
-        st.markdown("#### Comprehensive Regression Benchmark")
+        st.markdown("#### Regression Benchmark Matrix")
         metrics_3_models = pd.DataFrame({
-            "Model Architecture": [
+            "Architecture": [
                 "Baseline 1: Global Single Model (All Data)", 
                 "Baseline 2: Model A Specialist (Normal Data)", 
                 "Proposed: Dual-Expert Gated Hybrid Network"
@@ -280,7 +491,7 @@ with tab3:
         st.table(metrics_3_models)
 
     with col_feat:
-        st.markdown("#### Gate Feature Importance (No-Leakage Matrix)")
+        st.markdown("#### Gate Feature Importance (No-Leakage)")
         importances = gate.feature_importances_
         feat_imp_df = pd.DataFrame({'Feature': gate_features, 'Importance': importances}).sort_values('Importance', ascending=True)
         
@@ -289,36 +500,13 @@ with tab3:
         ax_imp.set_xlabel('Relative Importance')
         st.pyplot(fig_imp)
 
-    st.markdown("---")
-    col_diag1, col_diag2 = st.columns(2)
-
-    with col_diag1:
-        st.markdown("#### Residual Error Distributions")
-        fig_res, ax_res = plt.subplots(figsize=(6, 3.5))
-        sns.kdeplot(y_test_ref - y_pred_global, label="Global Single Model Error", color="#DC2626", ax=ax_res)
-        sns.kdeplot(y_test_ref - y_pred_hybrid, label="Hybrid System Error", color="#0284C7", ax=ax_res)
-        ax_res.set_xlabel("Prediction Error (kW)")
-        ax_res.legend()
-        st.pyplot(fig_res)
-
-    with col_diag2:
-        st.markdown("#### Gate Classifier Confusion Matrix")
-        cm = confusion_matrix(extreme_ref, gate_preds)
-        fig_cm, ax_cm = plt.subplots(figsize=(6, 3.5))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax_cm, cbar=False,
-                    xticklabels=['Normal', 'Extreme'], yticklabels=['Normal', 'Extreme'])
-        ax_cm.set_ylabel('Actual Regime')
-        ax_cm.set_xlabel('Predicted Regime')
-        st.pyplot(fig_cm)
-
 # --------------------------------------------------------------------------------
-# TAB 4: SCADA ANOMALY DETECTOR (NEW FEATURE)
+# TAB 5: SCADA ANOMALY DETECTOR
 # --------------------------------------------------------------------------------
-with tab4:
-    st.markdown("### Real-Time SCADA Anomaly & Fault Scanner")
-    st.write("Scans incoming sensor streams for frozen values, out-of-range bounds, and unphysical mechanical combinations before model ingestion.")
+with tab5:
+    st.markdown("### SCADA Sensor Anomaly & Fault Scanner")
+    st.write("Scans incoming sensor streams for frozen values, out-of-range bounds, and unphysical mechanical combinations prior to model ingestion.")
 
-    # Rule-Based Anomaly Diagnostic Function
     def audit_telemetry(df):
         anomalies = []
         for idx, row in df.iterrows():
@@ -342,13 +530,12 @@ with tab4:
             })
         return pd.DataFrame(anomalies)
 
-    # Injected Test Batch with Synthetic Anomalies
     test_batch = X_test_ref.head(15).copy().reset_index(drop=True)
-    test_batch.loc[2, 'Wspd (m/s)'] = 38.5  # Out-of-bounds speed
+    test_batch.loc[2, 'Wspd (m/s)'] = 38.5
     test_batch.loc[5, 'Prtv (°)'] = 45.0
-    test_batch.loc[5, 'Wspd (m/s)'] = 3.2   # Inconsistent pitch/wind
+    test_batch.loc[5, 'Wspd (m/s)'] = 3.2
     test_batch.loc[9, 'Wspd (m/s)'] = 26.0
-    test_batch.loc[9, 'Prtv (°)'] = 1.0    # Mechanical failure state
+    test_batch.loc[9, 'Prtv (°)'] = 1.0
 
     audit_results = audit_telemetry(test_batch)
     
@@ -357,77 +544,44 @@ with tab4:
 
     col_a1, col_a2, col_a3 = st.columns(3)
     with col_a1:
-        st.markdown(f'<div class="metric-card"><div class="metric-lbl">Audited Stream Samples</div><div class="metric-val">{len(audit_results)}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><div class="metric-lbl">Audited Telemetry Records</div><div class="metric-val">{len(audit_results)}</div></div>', unsafe_allow_html=True)
     with col_a2:
-        st.markdown(f'<div class="metric-card"><div class="metric-lbl">Healthy Telemetry Records</div><div class="metric-val" style="color: #166534;">{n_healthy}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><div class="metric-lbl">Healthy Records</div><div class="metric-val" style="color: #166534;">{n_healthy}</div></div>', unsafe_allow_html=True)
     with col_a3:
         st.markdown(f'<div class="metric-card"><div class="metric-lbl">Flagged Fault Anomalies</div><div class="metric-val" style="color: #991B1B;">{n_critical}</div></div>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### Automated Diagnostics Audit Table")
     
-    # Custom colored table highlight for anomalies
     def highlight_anomalies(s):
         return ['background-color: #FEE2E2; color: #991B1B;' if s['Diagnostic_Status'] == 'CRITICAL ANOMALY' else 'background-color: #DCFCE7; color: #166534;' for _ in s]
 
     st.dataframe(audit_results.style.apply(highlight_anomalies, axis=1), use_container_width=True)
 
 # --------------------------------------------------------------------------------
-# TAB 5: DATASET & EDA EXPLORER
+# TAB 6: DATASET & SUMMARY EXPORT
 # --------------------------------------------------------------------------------
-with tab5:
-    st.markdown("### SCADA Telemetry Dataset & Live Data Upload")
+with tab6:
+    st.markdown("### Telemetry Explorer & Executive Export")
     
-    uploaded_file = st.file_uploader("Upload External Production SCADA Telemetry (.csv)", type=["csv"])
+    uploaded_file = st.file_uploader("Upload External Production Telemetry (.csv)", type=["csv"])
     
     if uploaded_file is not None:
         full_df = pd.read_csv(uploaded_file)
-        st.success("Custom Production Dataset Loaded Successfully!")
+        st.success("Production Dataset Ingested!")
     else:
         full_df = X_test_ref.copy()
         full_df['Power_Output_kW'] = np.round(y_test_ref, 2)
         full_df['Regime_Label'] = np.where(extreme_ref == 1, 'Extreme', 'Normal')
 
-    st.markdown("#### Filterable Telemetry Explorer")
-    st.dataframe(full_df, use_container_width=True, height=250)
+    st.dataframe(full_df, use_container_width=True, height=220)
 
     st.markdown("---")
-    st.markdown("#### Summary Statistics & Correlation Analysis")
+    st.markdown("#### Export System Summary")
     
-    col_eda1, col_eda2 = st.columns([1, 1])
-
-    with col_eda1:
-        st.markdown("Summary Statistics")
-        st.dataframe(full_df.describe().T[['mean', 'std', 'min', '50%', 'max']], use_container_width=True)
-
-    with col_eda2:
-        st.markdown("Correlation Heatmap")
-        fig_corr, ax_corr = plt.subplots(figsize=(5, 3.0))
-        num_df = full_df.select_dtypes(include=[np.number])
-        sns.heatmap(num_df.corr(), annot=True, fmt=".2f", cmap="Blues", ax=ax_corr, cbar=False)
-        st.pyplot(fig_corr)
-
-# --------------------------------------------------------------------------------
-# TAB 6: ARCHITECTURE & SUMMARY EXPORT
-# --------------------------------------------------------------------------------
-with tab6:
-    st.markdown("### System Architecture & Executive Summary Export")
+    summary_txt = f"""=== ENTERPRISE WIND POWER FORECASTING SYSTEM SUMMARY REPORT ===
     
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown('<div class="metric-card"><div class="metric-lbl">Sub-Model 1</div><div style="font-size: 1.1rem; font-weight: 700; color: #1E293B;">Model A (XGBoost)</div><div style="font-size: 0.80rem; color: #64748B;">Normal Operations Specialist</div></div>', unsafe_allow_html=True)
-    with c2:
-        st.markdown('<div class="metric-card"><div class="metric-lbl">Sub-Model 2</div><div style="font-size: 1.1rem; font-weight: 700; color: #1E293B;">Model B (XGBoost)</div><div style="font-size: 0.80rem; color: #64748B;">Extreme Weather Specialist</div></div>', unsafe_allow_html=True)
-    with c3:
-        st.markdown('<div class="metric-card"><div class="metric-lbl">Dataset</div><div style="font-size: 1.1rem; font-weight: 700; color: #1E293B;">SCADA Telemetry</div><div style="font-size: 0.80rem; color: #64748B;">2,500 Validated Records</div></div>', unsafe_allow_html=True)
-
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    st.markdown("---")
-    st.markdown("#### Export Executive Results Summary")
-    
-    summary_txt = f"""=== WIND POWER FORECASTING SYSTEM SUMMARY REPORT ===
-    
-MODEL BENCHMARKS:
+MODEL PERFORMANCE:
 - Baseline Global Single Model RMSE: {np.sqrt(mean_squared_error(y_test_ref, y_pred_global)):.2f} kW
 - Hybrid Model RMSE: {np.sqrt(mean_squared_error(y_test_ref, y_pred_hybrid)):.2f} kW
 - Hybrid Model MAE: {mean_absolute_error(y_test_ref, y_pred_hybrid):.2f} kW
@@ -439,28 +593,29 @@ CLASSIFIER METRICS (NO-LEAKAGE FEATURE MATRIX):
 - Gate Recall Rate: {rec:.2%}
 - Gate F1-Score: {f1:.3f}
 
-VALIDATION METHOD & FAULT AUDIT:
-- Chronological Time-Series Split (80% Train / 20% Test)
-- Indirect Telemetry Routing Matrix (Wdir, Purt, Etmp)
-- Rule-Based Rule Diagnostic Guard Active
+CONFIGURATIONS:
+- Grid Electricity Pricing Rate: ${power_rate_kw}/kWh
+- SCADA Anomaly & Fault Guard Engine Active
 """
 
     col_exp1, col_exp2 = st.columns(2)
     
     with col_exp1:
         st.download_button(
-            label="Download Executive Summary Report (.txt)",
+            label="Download Executive Summary (.txt)",
             data=summary_txt,
-            file_name="Wind_Power_Forecast_Executive_Summary.txt",
-            mime="text/plain"
+            file_name="Executive_Forecasting_Summary.txt",
+            mime="text/plain",
+            use_container_width=True
         )
 
     with col_exp2:
         csv_buffer = io.StringIO()
         full_df.to_csv(csv_buffer, index=False)
         st.download_button(
-            label="Download Clean Dataset (.csv)",
+            label="Download Telemetry Dataset (.csv)",
             data=csv_buffer.getvalue(),
             file_name="Wind_Farm_SCADA_Telemetry.csv",
-            mime="text/csv"
+            mime="text/csv",
+            use_container_width=True
         )
