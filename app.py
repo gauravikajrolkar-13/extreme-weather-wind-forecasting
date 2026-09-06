@@ -143,20 +143,20 @@ def compute_engineered_features(df):
     """Calculates physical wind domain features for ML and DL models."""
     data = df.copy()
     
-    # 1. Kinetic Power Density Proxy (P ~ v^3)
+    # 1. Kinetic Power Density Proxy
     data['Wspd_Cubed'] = data['Wspd (m/s)'] ** 3
     
-    # 2. Air Density Correction Factor (approx function of temp)
+    # 2. Air Density Correction Factor
     air_density = 1.225 * (288.15 / (273.15 + data['Etmp (°C)']))
     data['Air_Density_kg_m3'] = air_density
     
-    # 3. Wind Power Density (WPD = 0.5 * rho * v^3)
+    # 3. Wind Power Density (WPD)
     data['Wind_Power_Density'] = 0.5 * air_density * data['Wspd_Cubed']
     
-    # 4. Pitch Interaction Proxy (effective aerodynamic drag force)
+    # 4. Pitch Interaction Proxy
     data['Pitch_Efficiency_Factor'] = np.cos(np.radians(data['Prtv (°)']))
     
-    # 5. Directional Sine/Cosine Trigonometric Encoding
+    # 5. Directional Sine/Cosine Encoding
     data['Wdir_Sin'] = np.sin(np.radians(data['Wdir (°)']))
     data['Wdir_Cos'] = np.cos(np.radians(data['Wdir (°)']))
     
@@ -177,11 +177,11 @@ def load_and_train_models():
     
     raw_df = pd.DataFrame(np.column_stack([wspd, wdir, prtv, purt, etmp]), columns=base_feature_names)
     
-    # Apply Feature Engineering
+    # Feature Engineering
     X = compute_engineered_features(raw_df)
     feature_names = list(X.columns)
 
-    # Power Curve Target Function
+    # Power Target Function
     y = 0.5 * (X['Wspd (m/s)'] ** 3) - (X['Prtv (°)'] * 18) + np.random.normal(0, 45, n_samples)
     y[X['Wspd (m/s)'] > 25.0] = 0.0  # Emergency Cut-out
     y = np.clip(y, 0, 1500)
@@ -220,7 +220,7 @@ def load_and_train_models():
     model_b = XGBRegressor(n_estimators=60, max_depth=5, learning_rate=0.08, tree_method='hist', random_state=42)
     model_b.fit(X_train[ext_train == 1], y_train[ext_train == 1])
 
-    # --- GATE ROUTER (No Target Leakage) ---
+    # --- GATE ROUTER ---
     gate_features = ['Wdir (°)', 'Purt (kVAR)', 'Etmp (°C)', 'Wdir_Sin', 'Wdir_Cos', 'Air_Density_kg_m3']
     X_gate_train = X_train[gate_features]
     
@@ -484,6 +484,58 @@ with tab4:
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("---")
 
+    # BAR CHART COMPARISONS (OVERALL VS STORM DAYS)
+    st.markdown("### 📊 Side-by-Side Model RMSE Comparison (Overall vs Storm)")
+
+    rmse_overall_ml = np.sqrt(mean_squared_error(y_test_ref, y_pred_global))
+    rmse_overall_dl = np.sqrt(mean_squared_error(y_test_ref, y_pred_dl))
+    rmse_overall_hybrid = np.sqrt(mean_squared_error(y_test_ref, y_pred_hybrid))
+
+    is_storm_test = extreme_ref == 1
+
+    rmse_storm_ml = np.sqrt(mean_squared_error(y_test_ref[is_storm_test], y_pred_global[is_storm_test]))
+    rmse_storm_dl = np.sqrt(mean_squared_error(y_test_ref[is_storm_test], y_pred_dl[is_storm_test]))
+    rmse_storm_hybrid = np.sqrt(mean_squared_error(y_test_ref[is_storm_test], y_pred_hybrid[is_storm_test]))
+
+    models = ["Machine Learning (XGBoost)", "Deep Learning (MLP)", "Gated Dual-Expert Hybrid"]
+
+    col_b1, col_b2 = st.columns(2)
+
+    with col_b1:
+        st.markdown("#### Overall RMSE Comparison across Test Set")
+        fig_ov = go.Figure(go.Bar(
+            x=models,
+            y=[rmse_overall_ml, rmse_overall_dl, rmse_overall_hybrid],
+            marker_color=['#7DD3FC', '#0284C7', '#0F172A'],
+            text=[f"{v:.1f} kW" for v in [rmse_overall_ml, rmse_overall_dl, rmse_overall_hybrid]],
+            textposition='auto'
+        ))
+        fig_ov.update_layout(
+            yaxis_title="RMSE (kW)",
+            height=380,
+            margin=dict(l=20, r=20, t=30, b=20),
+            xaxis_tickangle=-15
+        )
+        st.plotly_chart(fig_ov, use_container_width=True)
+
+    with col_b2:
+        st.markdown("#### Extreme Weather Regime RMSE (Storm Days)")
+        fig_st = go.Figure(go.Bar(
+            x=models,
+            y=[rmse_storm_ml, rmse_storm_dl, rmse_storm_hybrid],
+            marker_color=['#FCA5A5', '#DC2626', '#7F1D1D'],
+            text=[f"{v:.1f} kW" for v in [rmse_storm_ml, rmse_storm_dl, rmse_storm_hybrid]],
+            textposition='auto'
+        ))
+        fig_st.update_layout(
+            yaxis_title="RMSE (kW)",
+            height=380,
+            margin=dict(l=20, r=20, t=30, b=20),
+            xaxis_tickangle=-15
+        )
+        st.plotly_chart(fig_st, use_container_width=True)
+
+    st.markdown("---")
     st.markdown("#### Ground Truth Actual Power vs. ML & Deep Learning Models")
     
     sample_indices = np.arange(60)
