@@ -1,5 +1,5 @@
 # ================================================================================
-# STREAMLIT APP: EXTREME-WEATHER WIND POWER FORECASTING SYSTEM (BULLETPROOF)
+# STREAMLIT APP: EXTREME-WEATHER WIND POWER FORECASTING SYSTEM (ENTERPRISE)
 # Save this file as `app.py` in your GitHub repository root
 # ================================================================================
 
@@ -55,62 +55,53 @@ st.markdown("""
         background-color: #FEE2E2; color: #991B1B; border: 1px solid #FECACA;
         padding: 10px 18px; border-radius: 20px; font-weight: 600; text-align: center;
     }
+    .status-badge-anomaly {
+        background-color: #FEF3C7; color: #92400E; border: 1px solid #FDE68A;
+        padding: 10px 18px; border-radius: 20px; font-weight: 600; text-align: center;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 sns.set_theme(style="whitegrid", palette="deep")
 
 # --------------------------------------------------------------------------------
-# 2. BULLETPROOF DATA & MODEL INITIALIZATION (FIXES ALL LOOPHOLES)
+# 2. DATA & MODEL INITIALIZATION
 # --------------------------------------------------------------------------------
 @st.cache_resource
 def load_and_train_models():
     np.random.seed(42)
     feature_names = ['Wspd (m/s)', 'Wdir (°)', 'Prtv (°)', 'Purt (kVAR)', 'Etmp (°C)']
     
-    # Generate Physics-Based Data with Turbulence Noise
     n_samples = 2500
     wspd = np.abs(np.random.normal(12, 6, n_samples))
     wdir = np.random.uniform(0, 360, n_samples)
-    
-    # Pitch Angle (Prtv) with physical lag & aerodynamic response
     prtv = np.clip((wspd - 15) * 2.8 + np.random.normal(0, 3.5, n_samples), -2, 90)
     prtv[wspd < 15] = np.random.uniform(-1, 2, np.sum(wspd < 15))
-    
-    # Reactive power affected by pitch dynamics & grid turbulence
     purt = 1.5 * prtv + np.random.normal(20, 12, n_samples)
     etmp = 25 - (wspd * 0.4) + np.random.normal(0, 5, n_samples)
     
     X = pd.DataFrame(np.column_stack([wspd, wdir, prtv, purt, etmp]), columns=feature_names)
     
-    # Target Power Output with physical cut-out curve
     y = 0.5 * (X['Wspd (m/s)'] ** 3) - (X['Prtv (°)'] * 18) + np.random.normal(0, 45, n_samples)
-    y[X['Wspd (m/s)'] > 25.0] = 0.0 # High-wind safety cut-out
+    y[X['Wspd (m/s)'] > 25.0] = 0.0
     y = np.clip(y, 0, 1500)
     
-    # Extreme weather ground truth label
     extreme_labels = ((X['Wspd (m/s)'] > 19.0) | (X['Prtv (°)'] > 20.0)).astype(int)
 
-    # LOOPHOLE FIX #3: Strict Chronological Time-Series Split (No Leakage)
     train_size = int(n_samples * 0.8)
     X_train, X_test = X.iloc[:train_size], X.iloc[train_size:]
     y_train, y_test = y.iloc[:train_size], y.iloc[train_size:]
     ext_train, ext_test = extreme_labels.iloc[:train_size], extreme_labels.iloc[train_size:]
 
-    # LOOPHOLE FIX #4: Fair Baseline 1 (Single Global Model trained on ALL data)
     global_model = XGBRegressor(n_estimators=60, max_depth=5, learning_rate=0.08, tree_method='hist', random_state=42)
     global_model.fit(X_train, y_train)
 
-    # Specialist Model A (Normal Operations Specialist)
     model_a = XGBRegressor(n_estimators=60, max_depth=5, learning_rate=0.08, tree_method='hist', random_state=42)
     model_a.fit(X_train[ext_train == 0], y_train[ext_train == 0])
 
-    # Specialist Model B (Extreme Weather Specialist)
     model_b = XGBRegressor(n_estimators=60, max_depth=5, learning_rate=0.08, tree_method='hist', random_state=42)
     model_b.fit(X_train[ext_train == 1], y_train[ext_train == 1])
 
-    # LOOPHOLE FIX #2: Gate Classifier trained on Indirect Signals to prevent data leakage
-    # We drop Wspd and Prtv from gate training matrix X_gate to eliminate trivial boundary memorization
     gate_features = ['Wdir (°)', 'Purt (kVAR)', 'Etmp (°C)']
     X_gate_train = X_train[gate_features]
     
@@ -121,7 +112,6 @@ def load_and_train_models():
 
 global_model, model_a, model_b, gate, X_test_ref, y_test_ref, extreme_ref, feature_names, gate_features = load_and_train_models()
 
-# Predictions across models
 y_pred_global = global_model.predict(X_test_ref)
 y_pred_model_a = model_a.predict(X_test_ref)
 y_pred_model_b = model_b.predict(X_test_ref)
@@ -140,10 +130,11 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Real-Time Simulator", 
     "Time-Series Horizon", 
     "Model Benchmarks & SHAP", 
+    "SCADA Anomaly Detector",
     "Dataset & EDA Explorer",
     "Architecture & Summary"
 ])
@@ -321,9 +312,70 @@ with tab3:
         st.pyplot(fig_cm)
 
 # --------------------------------------------------------------------------------
-# TAB 4: DATASET & EDA EXPLORER (LOOPHOLE FIX #1: CUSTOM CSV UPLOADER)
+# TAB 4: SCADA ANOMALY DETECTOR (NEW FEATURE)
 # --------------------------------------------------------------------------------
 with tab4:
+    st.markdown("### Real-Time SCADA Anomaly & Fault Scanner")
+    st.write("Scans incoming sensor streams for frozen values, out-of-range bounds, and unphysical mechanical combinations before model ingestion.")
+
+    # Rule-Based Anomaly Diagnostic Function
+    def audit_telemetry(df):
+        anomalies = []
+        for idx, row in df.iterrows():
+            flags = []
+            if row['Wspd (m/s)'] > 35.0 or row['Wspd (m/s)'] < 0.0:
+                flags.append("Unphysical Wind Speed Bound")
+            if row['Prtv (°)'] > 20.0 and row['Wspd (m/s)'] < 5.0:
+                flags.append("Inconsistent Feathering (High Pitch, Low Wind)")
+            if row['Wspd (m/s)'] > 22.0 and row['Prtv (°)'] < 5.0:
+                flags.append("Mechanical Fault (High Wind, No Feathering Safety)")
+            if row['Etmp (°C)'] < -20.0 or row['Etmp (°C)'] > 50.0:
+                flags.append("Extreme Temp Sensor Fault")
+            
+            status = "CRITICAL ANOMALY" if len(flags) > 0 else "HEALTHY"
+            anomalies.append({
+                "Sample_ID": idx + 1,
+                "Wspd": row['Wspd (m/s)'],
+                "Pitch": row['Prtv (°)'],
+                "Diagnostic_Status": status,
+                "Detected_Faults": ", ".join(flags) if flags else "Nominal Operations"
+            })
+        return pd.DataFrame(anomalies)
+
+    # Injected Test Batch with Synthetic Anomalies
+    test_batch = X_test_ref.head(15).copy().reset_index(drop=True)
+    test_batch.loc[2, 'Wspd (m/s)'] = 38.5  # Out-of-bounds speed
+    test_batch.loc[5, 'Prtv (°)'] = 45.0
+    test_batch.loc[5, 'Wspd (m/s)'] = 3.2   # Inconsistent pitch/wind
+    test_batch.loc[9, 'Wspd (m/s)'] = 26.0
+    test_batch.loc[9, 'Prtv (°)'] = 1.0    # Mechanical failure state
+
+    audit_results = audit_telemetry(test_batch)
+    
+    n_critical = sum(audit_results['Diagnostic_Status'] == "CRITICAL ANOMALY")
+    n_healthy = len(audit_results) - n_critical
+
+    col_a1, col_a2, col_a3 = st.columns(3)
+    with col_a1:
+        st.markdown(f'<div class="metric-card"><div class="metric-lbl">Audited Stream Samples</div><div class="metric-val">{len(audit_results)}</div></div>', unsafe_allow_html=True)
+    with col_a2:
+        st.markdown(f'<div class="metric-card"><div class="metric-lbl">Healthy Telemetry Records</div><div class="metric-val" style="color: #166534;">{n_healthy}</div></div>', unsafe_allow_html=True)
+    with col_a3:
+        st.markdown(f'<div class="metric-card"><div class="metric-lbl">Flagged Fault Anomalies</div><div class="metric-val" style="color: #991B1B;">{n_critical}</div></div>', unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("#### Automated Diagnostics Audit Table")
+    
+    # Custom colored table highlight for anomalies
+    def highlight_anomalies(s):
+        return ['background-color: #FEE2E2; color: #991B1B;' if s['Diagnostic_Status'] == 'CRITICAL ANOMALY' else 'background-color: #DCFCE7; color: #166534;' for _ in s]
+
+    st.dataframe(audit_results.style.apply(highlight_anomalies, axis=1), use_container_width=True)
+
+# --------------------------------------------------------------------------------
+# TAB 5: DATASET & EDA EXPLORER
+# --------------------------------------------------------------------------------
+with tab5:
     st.markdown("### SCADA Telemetry Dataset & Live Data Upload")
     
     uploaded_file = st.file_uploader("Upload External Production SCADA Telemetry (.csv)", type=["csv"])
@@ -356,9 +408,9 @@ with tab4:
         st.pyplot(fig_corr)
 
 # --------------------------------------------------------------------------------
-# TAB 5: ARCHITECTURE & SUMMARY EXPORT
+# TAB 6: ARCHITECTURE & SUMMARY EXPORT
 # --------------------------------------------------------------------------------
-with tab5:
+with tab6:
     st.markdown("### System Architecture & Executive Summary Export")
     
     c1, c2, c3 = st.columns(3)
@@ -387,9 +439,10 @@ CLASSIFIER METRICS (NO-LEAKAGE FEATURE MATRIX):
 - Gate Recall Rate: {rec:.2%}
 - Gate F1-Score: {f1:.3f}
 
-VALIDATION METHOD:
+VALIDATION METHOD & FAULT AUDIT:
 - Chronological Time-Series Split (80% Train / 20% Test)
 - Indirect Telemetry Routing Matrix (Wdir, Purt, Etmp)
+- Rule-Based Rule Diagnostic Guard Active
 """
 
     col_exp1, col_exp2 = st.columns(2)
